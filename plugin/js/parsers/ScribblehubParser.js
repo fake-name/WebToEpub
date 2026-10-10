@@ -2,6 +2,44 @@
 
 parserFactory.register("scribblehub.com", () => new ScribblehubParser());
 
+class ScribblehubFetchErrorHandler extends FetchErrorHandler {
+    constructor() {
+        super();
+        // seconds to wait before each retry of a network-level failure
+        // (note: order is reversed, delays are popped)
+        this.networkRetryDelay = [60, 30, 15];
+    }
+
+    // Cloudflare has permanently 403-blocked the client, so retrying (or
+    // asking the user to retry) just risks deepening the block.  Halt now.
+    // (must override onResponseError: getAutomaticRetryBehaviourForStatus is
+    // static and invoked base-qualified, an override would never run)
+    onResponseError(url, wrapOptions, response, errorMessage) {
+        if (httpResponse.status === 403) {
+            let failError;
+            if (errorMessage) {
+                failError = new Error(errorMessage);
+            } else {
+                failError = new Error(this.makeFailMessage(response.url, response.status));
+            }
+            return Promise.reject(failError);
+        }
+        return super.onResponseError(url, wrapOptions, response, errorMessage);
+    }
+
+    // network-level failures (connection reset, DNS, timeout) reject from
+    // fetch() with TypeError; errors raised before fetching (e.g. blocked
+    // sites) are plain Errors and must not be retried
+    onFetchError(url, error) {
+        if ((error instanceof TypeError) && (0 < this.networkRetryDelay.length)) {
+            let delay = this.networkRetryDelay.pop() * 1000;
+            return util.sleep(delay)
+                .then(() => HttpClient.wrapFetch(url, { errorHandler: this }));
+        }
+        return super.onFetchError(url, error);
+    }
+}
+
 class ScribblehubParser extends Parser {
     constructor() {
         super();
@@ -33,7 +71,9 @@ class ScribblehubParser extends Parser {
             await HttpClient.setDeclarativeNetRequestRules(
                 ScribblehubParser.makeFetchRules(referer)
             );
-            dom = (await HttpClient.wrapFetch(url)).responseXML;
+            dom = (await HttpClient.wrapFetch(url,
+                { errorHandler: new ScribblehubFetchErrorHandler() }
+            )).responseXML;
             referer = url;
             let partialList = ScribblehubParser.getChapterUrlsFromTocPage(dom);
             chapterUrlsUI.showTocProgress(partialList);
@@ -90,7 +130,9 @@ class ScribblehubParser extends Parser {
             ScribblehubParser.makeFetchRules(this.tocURL)
         );
 
-        return (await HttpClient.wrapFetch(url)).responseXML;
+        return (await HttpClient.wrapFetch(url,
+            { errorHandler: new ScribblehubFetchErrorHandler() }
+        )).responseXML;
     }
 
     findContent(dom) {
