@@ -73,7 +73,9 @@ class FetchErrorHandler {
         return new Promise((resolve, reject) => {
             if (wrapOptions.retry.HTTP === 403) {
                 msg.openurl = response.url;
-                msg.blockurl = url;
+                // block the site that actually sent the 403 (final URL after
+                // redirects), not an intermediate tracker link
+                msg.blockurl = response.url;
             }
             msg.retryAction = () => resolve(HttpClient.wrapFetchImpl(url, wrapOptions));
             msg.cancelAction = () => reject(failError);
@@ -237,6 +239,17 @@ class HttpClient {
     }
 
     static checkResponseAndGetData(url, wrapOptions, response) {
+        // the pre-fetch host check can't see where a redirect lands, so for
+        // image content (e.g. an image behind an outgoing-link tracker) also
+        // check the host of the final URL.  This only ever runs when the
+        // original URL was not blocked: wrapFetchImpl rejects those pre-fetch.
+        if (wrapOptions.imageFetch
+            && response.redirected
+            && BlockedHostNames.has(new URL(response.url).hostname)) {
+            // reject without calling onFetchError: the catch in wrapFetchImpl
+            // formats the message (calling it here wraps it twice)
+            return Promise.reject(new Error("!Blocked! URL skipped because the user blocked the site"));
+        }
         if (!response.ok) {
             return wrapOptions.errorHandler.onResponseError(url, wrapOptions, response);
         } else {

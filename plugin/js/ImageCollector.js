@@ -424,7 +424,7 @@ class ImageCollector {
         {
             let initialUrl = this.initialUrlToTry(imageInfo);
             this.urlIndex.set(initialUrl, imageInfo.index);
-            let fetchOptions = {errorHandler: new FetchImageErrorHandler(parentPageUrl) };
+            let fetchOptions = {errorHandler: new FetchImageErrorHandler(parentPageUrl), imageFetch: true };
             let xhr = await HttpClient.wrapFetch(initialUrl, fetchOptions);
             xhr = await this.findImageFileUrl(xhr, imageInfo, imageInfo.dataOrigFileUrl, fetchOptions);
             imageInfo.mediaType = xhr.contentType;
